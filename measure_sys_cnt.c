@@ -23,7 +23,7 @@ void handle_sigusr1(int signum) {
 }
 
 void *do_cnt (void *arg) {
-  pid_t pid;
+  pid_t pid __attribute__((unused));
 
   while (1) {
     pid = getpid();
