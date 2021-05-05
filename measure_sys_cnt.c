@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <asm/unistd.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <signal.h>
@@ -9,6 +10,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <sched.h>
+#include <assert.h>
 
 #define handle_err_en(en, msg) \
   do                           \
@@ -30,6 +32,18 @@
 
 static bool if_continue = true;
 static int retval = 0;
+
+void getpid_asm() {
+  // register pid_t pid asm ("rax");
+  asm volatile (
+    "mov %0, %%rax\n\t"
+    "syscall\n\t"
+    : 
+    : "i"(__NR_getpid)
+    :
+  );
+  // return pid;
+}
 
 void handle_sigusr1(int signum) {
   printf("Caught signal %d, going to terminate.\n", signum);
@@ -60,7 +74,7 @@ void *do_cnt(void *arg) {
   }
 
   while (if_continue) {
-    getpid();
+    getpid_asm();
     ++nsyscalls;
   }
 
