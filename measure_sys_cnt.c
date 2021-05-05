@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sched.h>
 #include <assert.h>
+#include <setjmp.h>
 
 #define handle_err_en(en, msg) \
   do                           \
@@ -30,40 +31,41 @@
 #define SEC_TO_NS 1e9
 #define GET_ELAPSED_TIME(s, e) ((e.tv_sec - s.tv_sec) * SEC_TO_NS + (e.tv_nsec - s.tv_nsec))
 
-static bool if_continue = true;
 static int retval = 0;
-
-void getpid_asm() {
-  // register pid_t pid asm ("rax");
-  asm volatile (
-    "mov %0, %%rax\n\t"
-    "syscall\n\t"
-    : 
-    : "i"(__NR_getpid)
-    :
-  );
-  // return pid;
-}
+static jmp_buf jmpbuf;
 
 void handle_sigusr1(int signum) {
-  printf("Caught signal %d, going to terminate.\n", signum);
-  // terminate the infinite while loop
-  if_continue = false;
+  printf("Caught signal %d, stopping ...\n", signum);
+  // R: for debug :)
+  printf("Signal handler TID: %d\n", gettid());
+
+  // back to the counter thread
+  longjmp(jmpbuf, 1);
+}
+
+void print_report(uint64_t nsyscalls, struct timespec* start, struct timespec* finish) {
+  printf("Executed total %lu syscalls.\n", nsyscalls);
+
+  // nano seconds
+  double avg_exetime = 0.0;
+  unsigned long long elapsed_ns = GET_ELAPSED_TIME((*start), (*finish));
+  printf("In total the elapsed time is: %llu ns.\n", elapsed_ns);
+  avg_exetime = elapsed_ns / nsyscalls;
+  printf("On average, each syscall execution time: %lf ns.\n", avg_exetime);
 }
 
 void *do_cnt(void *arg) {
   register uint64_t nsyscalls = 0;
-  struct timespec start, end;
 
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(struct sigaction));
-  sa.sa_handler = handle_sigusr1;
+  // R: for debug :)
+  printf("Child thread TID: %d\n", gettid());
 
-  // install the signal handler
-  if (sigaction(SIGUSR1, &sa, NULL) < 0) {
-    perror("Failed to register signal handler.");
-    retval = errno;
-    pthread_exit(&retval);
+  static struct timespec start, finish;
+
+  if (setjmp(jmpbuf)) {
+    // read finish time
+    clock_gettime(CLOCK_MONOTONIC, &finish);
+    goto finish;
   }
 
   // read the start time
@@ -73,32 +75,48 @@ void *do_cnt(void *arg) {
     pthread_exit(&retval);
   }
 
-  while (if_continue) {
-    getpid_asm();
+  // R: explicit register declaration (I think this is new in GCC 8)
+  // used for both return value and syscall no.
+  register uint64_t rax __asm__("rax");
+
+  // R: use unconditional jumps to minimise clock time for checking
+  while (1) {
+    // R: make inline to avoid measuring stack management
+    // on the next loop, rax will become the return value
+    rax = __NR_getpid;
+    asm volatile (
+      "mov %0, %%rax\n\t"
+      "syscall\n\t"
+      : "+r" (rax) // "+ is R/W for RAX"
+      : // no inputs
+      : "rcx", "r11" // these registers are clobbered after syscall
+    );
+    // R: uncomment to see if returned PID is correct
+    // printf("My PID: %ld\n", rax);
+    // break;
     ++nsyscalls;
   }
 
-  // read the end time
-  if (clock_gettime(CLOCK_MONOTONIC, &end) < 0) {
-    perror("Failed to get end time.");
-    retval = errno;
-    pthread_exit(&retval);
-  }
-
-  // read the count and store to the vector
-  printf("Executed %lu syscalls per second.\n", nsyscalls);
-
-  // nano seconds
-  double avg_exetime = 0.0;
-  unsigned long long elapsed_ns = GET_ELAPSED_TIME(start, end);
-  printf("In total the elapsed time is: %llu ns.\n", elapsed_ns);
-  avg_exetime = elapsed_ns / nsyscalls;
-  printf("On average, each syscall execution time: %lf ns.\n", avg_exetime);
-
-  pthread_exit(&retval);
+finish:
+  print_report(nsyscalls, &start, &finish);
+  return &retval;
 }
 
 int main(int argc, char **argv) {
+  // R: for debug :)
+  printf("Main thread TID: %d\n", gettid());
+
+  // R: install the signal handler in the main thread.
+  // the child thread will inherit this mask.
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(struct sigaction));
+  sa.sa_handler = handle_sigusr1;
+
+  if (sigaction(SIGUSR1, &sa, NULL) < 0) {
+    perror("Failed to register signal handler.");
+    exit(EXIT_FAILURE);
+  }
+
   // interval of measurement
   int interval;
   pthread_t t_id;
@@ -131,7 +149,7 @@ int main(int argc, char **argv) {
     handle_err_en(ret, "Failed to join with the thread.");
   }
 
-  printf("Thread terminated :%ld with status %d\n.", t_id, *(int *)status);
+  printf("Thread terminated : %ld with status %d\n.", t_id, *(int *)status);
 
   return 0;
 }
