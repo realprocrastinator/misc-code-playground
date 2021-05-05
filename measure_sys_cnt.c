@@ -10,7 +10,6 @@
 #include <string.h>
 #include <sched.h>
 
-#define INTERVAL 1
 #define handle_err_en(en, msg) \
   do                           \
   {                            \
@@ -85,16 +84,29 @@ void *do_cnt(void *arg) {
   pthread_exit(&retval);
 }
 
-int main() {
+int main(int argc, char **argv) {
+  // interval of measurement
+  int interval;
   pthread_t t_id;
   int ret;
   void *status = NULL;
+  
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s interval of measurement\n",
+                       argv[0]);
+    exit(EXIT_FAILURE);
+  }
 
+  if ((interval = atoi(argv[1])) <= 0 ) {
+    fprintf(stderr, "interval of measurement must be a positive number\n");
+    exit(EXIT_FAILURE);
+  }
+  
   if ((ret = pthread_create(&t_id, NULL, do_cnt, NULL)) != 0) {
     handle_err_en(ret, "Failed to create pthread.");
   }
 
-  sleep(1);
+  sleep(interval);
 
   // kill the running thread
   if ((ret = pthread_kill(t_id, SIGUSR1)) != 0) {
