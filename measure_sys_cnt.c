@@ -33,15 +33,7 @@
 
 static int retval = 0;
 static jmp_buf jmpbuf;
-
-void handle_sigusr1(int signum) {
-  printf("Caught signal %d, stopping ...\n", signum);
-  // R: for debug :)
-  printf("Signal handler TID: %d\n", gettid());
-
-  // back to the counter thread
-  longjmp(jmpbuf, 1);
-}
+static struct timespec time_start;
 
 void print_report(uint64_t nsyscalls, struct timespec* start, struct timespec* finish) {
   printf("Executed total %lu syscalls.\n", nsyscalls);
@@ -54,22 +46,37 @@ void print_report(uint64_t nsyscalls, struct timespec* start, struct timespec* f
   printf("On average, each syscall execution time: %lf ns.\n", avg_exetime);
 }
 
+void handle_sigusr1(int signum) {
+  printf("Caught signal %d, stopping ...\n", signum);
+  // R: for debug :)
+  printf("Signal handler TID: %d\n", gettid());
+
+  // read counter from register!
+  register uint64_t nsyscalls __asm__("r12");
+  
+  // current time
+  struct timespec time_end;
+  clock_gettime(CLOCK_MONOTONIC, &time_end);
+
+  //report!
+  print_report(nsyscalls, &time_start, &time_end);
+
+  // back to the counter thread so that it can return
+  longjmp(jmpbuf, 1);
+}
+
 void *do_cnt(void *arg) {
-  register uint64_t nsyscalls = 0;
+  // store syscall count in r12, because this register is persisted.
+  register uint64_t nsyscalls __asm__("r12") = 0;
 
   // R: for debug :)
   printf("Child thread TID: %d\n", gettid());
 
-  static struct timespec start, finish;
-
-  if (setjmp(jmpbuf)) {
-    // read finish time
-    clock_gettime(CLOCK_MONOTONIC, &finish);
+  if (setjmp(jmpbuf))
     goto finish;
-  }
 
   // read the start time
-  if (clock_gettime(CLOCK_MONOTONIC, &start) < 0) {
+  if (clock_gettime(CLOCK_MONOTONIC, &time_start) < 0) {
     perror("Failed to get start time.");
     retval = errno;
     pthread_exit(&retval);
@@ -78,27 +85,33 @@ void *do_cnt(void *arg) {
   // R: explicit register declaration (I think this is new in GCC 8)
   // used for both return value and syscall no.
   register uint64_t rax __asm__("rax");
-
   // R: use unconditional jumps to minimise clock time for checking
   while (1) {
     // R: make inline to avoid measuring stack management
     // on the next loop, rax will become the return value
     rax = __NR_getpid;
     asm volatile (
-      "mov %0, %%rax\n\t"
       "syscall\n\t"
       : "+r" (rax) // "+ is R/W for RAX"
       : // no inputs
       : "rcx", "r11" // these registers are clobbered after syscall
     );
+    
     // R: uncomment to see if returned PID is correct
     // printf("My PID: %ld\n", rax);
-    // break;
-    ++nsyscalls;
+    // if(nsyscalls > 2)
+    //   break;
+
+    // ++nsyscalls
+    asm volatile (
+      "inc %%r12\n\t"
+      : "+r" (nsyscalls)
+      :
+      :
+    );
   }
 
 finish:
-  print_report(nsyscalls, &start, &finish);
   return &retval;
 }
 
