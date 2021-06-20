@@ -3,7 +3,9 @@
 *ez*
 measure_sys_cnt
 **/.vscode
-**/*build/
+**/*build*/
 *.o
 *.so
-
+*.a
+sysraw/
+test/
