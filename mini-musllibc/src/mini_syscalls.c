@@ -1,6 +1,6 @@
 #include "../include/unistd.h"
-#include <sys/syscall.h>
-#include <errno.h>
+#include "../include/sys/syscall.h"
+#include "../include/errno.h"
 #include <stdarg.h>
 #include "../include/fcntl.h"
 #include "../include/mini_syscalls.h"
