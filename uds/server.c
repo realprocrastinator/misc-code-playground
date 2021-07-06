@@ -99,6 +99,7 @@ main(int argc, char *argv[])
 
             /* Wait for next data packet. */
 
+            puts("Waiting...");
             ret = read(data_socket, buffer, sizeof(buffer));
             if (ret == -1) {
                 perror("read");
@@ -109,11 +110,12 @@ main(int argc, char *argv[])
 
             buffer[sizeof(buffer) - 1] = 0;
 
-            /* Handle commands. */
+            printf("Data received: %s\n", buffer);
+
+            // /* Handle commands. */
 
             if (!strncmp(buffer, "DOWN", sizeof(buffer))) {
                 down_flag = 1;
-                break;
             }
 
             if (!strncmp(buffer, "END", sizeof(buffer))) {
@@ -122,12 +124,13 @@ main(int argc, char *argv[])
 
             /* Add received summand. */
 
-            result += atoi(buffer);
+            result += atoi(buffer); 
+            break;
         }
 
         /* Send result. */
 
-        sprintf(buffer, "%d", result);
+        // sprintf(buffer, "%d", result);
         ret = write(data_socket, buffer, sizeof(buffer));
         if (ret == -1) {
             perror("write");
